@@ -1,5 +1,26 @@
 import { useEffect, useState } from 'react';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import { supabase, supabaseConfigured } from '../../lib/supabase';
+
+marked.setOptions({ breaks: true });
+
+// DOMPurify precisa de um DOM de verdade — no build (SSR/prerender em Node) essa página não
+// tem window, então só registra o hook e sanitiza no navegador.
+if (typeof window !== 'undefined') {
+  // Links de posts abrem em nova aba, sem dar acesso da nova aba de volta pro site.
+  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    if (node.tagName === 'A') {
+      node.setAttribute('target', '_blank');
+      node.setAttribute('rel', 'noopener noreferrer');
+    }
+  });
+}
+
+function renderBody(markdown: string) {
+  const html = marked.parse(markdown, { async: false });
+  return typeof window !== 'undefined' ? DOMPurify.sanitize(html) : '';
+}
 
 const PAGE_SIZE = 5;
 
@@ -16,7 +37,6 @@ interface PostResult {
   player_name: string;
   wins: number;
   losses: number;
-  points: number;
   paste_url: string | null;
 }
 
@@ -53,7 +73,7 @@ export default function NewsFeed() {
       const ids = newPosts.map((p) => p.id);
       const { data: resultsData } = await supabase
         .from('post_results')
-        .select('post_id, wins, losses, points, paste_url, league_players(name)')
+        .select('post_id, wins, losses, paste_url, league_players(name)')
         .in('post_id', ids);
 
       const grouped: Record<string, PostResult[]> = {};
@@ -61,7 +81,6 @@ export default function NewsFeed() {
         post_id: string;
         wins: number;
         losses: number;
-        points: number;
         paste_url: string | null;
         league_players: { name: string } | null;
       }>) ?? []) {
@@ -70,7 +89,6 @@ export default function NewsFeed() {
           player_name: row.league_players?.name ?? '—',
           wins: row.wins,
           losses: row.losses,
-          points: row.points,
           paste_url: row.paste_url,
         };
         if (!grouped[entry.post_id]) grouped[entry.post_id] = [];
@@ -78,7 +96,7 @@ export default function NewsFeed() {
       }
       for (const key of Object.keys(grouped)) {
         grouped[key].sort(
-          (a, b) => b.points - a.points || a.player_name.localeCompare(b.player_name, 'pt-BR'),
+          (a, b) => b.wins - a.wins || a.player_name.localeCompare(b.player_name, 'pt-BR'),
         );
       }
       setResultsByPost((prev) => ({ ...prev, ...grouped }));
@@ -150,7 +168,10 @@ function PostCard({ post, results }: { post: Post; results: PostResult[] }) {
           })}
         </p>
         <h2 className="font-display mt-1 text-2xl font-bold text-white">{post.title}</h2>
-        <p className="mt-3 whitespace-pre-line text-white/70">{post.body}</p>
+        <div
+          className="mt-3 space-y-3 text-white/70 [&_a]:text-prank-purple-light [&_a]:underline [&_a]:underline-offset-2 [&_a:hover]:text-prank-gold [&_strong]:font-semibold [&_strong]:text-white [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
+          dangerouslySetInnerHTML={{ __html: renderBody(post.body) }}
+        />
 
         {results.length > 0 && (
           <div className="mt-5 overflow-x-auto rounded-lg border border-prank-border">
@@ -160,7 +181,6 @@ function PostCard({ post, results }: { post: Post; results: PostResult[] }) {
                   <th className="px-4 py-3">#</th>
                   <th className="px-4 py-3">Jogador</th>
                   <th className="px-4 py-3 text-center">W-L</th>
-                  <th className="px-4 py-3 text-right">Pontos</th>
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
@@ -173,9 +193,6 @@ function PostCard({ post, results }: { post: Post; results: PostResult[] }) {
                     <td className="px-4 py-3 font-medium">{r.player_name}</td>
                     <td className="px-4 py-3 text-center text-white/70">
                       {r.wins}-{r.losses}
-                    </td>
-                    <td className="px-4 py-3 text-right font-display text-lg font-bold">
-                      {r.points}
                     </td>
                     <td className="px-4 py-3 text-right">
                       {r.paste_url && (

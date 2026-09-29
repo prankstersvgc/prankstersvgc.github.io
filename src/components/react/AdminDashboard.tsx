@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { supabase, supabaseConfigured } from '../../lib/supabase';
 import { base } from '../../lib/base';
+import ImageCropper from './ImageCropper';
 
 type Tab = 'liga' | 'noticias' | 'torneios';
 
@@ -840,7 +841,6 @@ interface PostResultEntry {
   name: string;
   wins: number;
   losses: number;
-  points: number;
   paste_url: string | null;
 }
 
@@ -853,6 +853,7 @@ function NewsPanel() {
   const [postDate, setPostDate] = useState(today());
   const [body, setBody] = useState('');
   const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [rawCoverFile, setRawCoverFile] = useState<File | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -861,6 +862,9 @@ function NewsPanel() {
   const [editDate, setEditDate] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [rawEditCoverFile, setRawEditCoverFile] = useState<File | null>(null);
+  const [uploadingCover, setUploadingCover] = useState(false);
+  const [coverError, setCoverError] = useState<string | null>(null);
 
   const [playerName, setPlayerName] = useState('');
   const [wins, setWins] = useState(0);
@@ -884,7 +888,7 @@ function NewsPanel() {
   async function loadResults(postId: string) {
     const { data } = await supabase
       .from('post_results')
-      .select('id, player_id, wins, losses, points, paste_url, league_players(name)')
+      .select('id, player_id, wins, losses, paste_url, league_players(name)')
       .eq('post_id', postId);
     const list = (
       (data as unknown as Array<{
@@ -892,7 +896,6 @@ function NewsPanel() {
         player_id: string;
         wins: number;
         losses: number;
-        points: number;
         paste_url: string | null;
         league_players: { name: string } | null;
       }>) ?? []
@@ -902,10 +905,9 @@ function NewsPanel() {
       name: r.league_players?.name ?? '—',
       wins: r.wins,
       losses: r.losses,
-      points: r.points,
       paste_url: r.paste_url,
     }));
-    list.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name, 'pt-BR'));
+    list.sort((a, b) => b.wins - a.wins || a.name.localeCompare(b.name, 'pt-BR'));
     setResults(list);
   }
 
@@ -914,6 +916,8 @@ function NewsPanel() {
     setEditTitle(post.title);
     setEditBody(post.body);
     setEditDate(post.post_date);
+    setRawEditCoverFile(null);
+    setCoverError(null);
     loadResults(post.id);
   }
 
@@ -924,8 +928,10 @@ function NewsPanel() {
 
     let coverPath: string | null = null;
     if (coverFile) {
-      const path = `posts/${Date.now()}-${coverFile.name.replace(/\s+/g, '-')}`;
-      const { error: uploadErr } = await supabase.storage.from('gallery').upload(path, coverFile);
+      const path = `posts/${Date.now()}-cover.jpg`;
+      const { error: uploadErr } = await supabase.storage
+        .from('gallery')
+        .upload(path, coverFile, { contentType: 'image/jpeg' });
       if (uploadErr) {
         setCreateError(uploadErr.message);
         setCreating(false);
@@ -950,6 +956,7 @@ function NewsPanel() {
     setBody('');
     setPostDate(today());
     setCoverFile(null);
+    setRawCoverFile(null);
     await loadPosts();
     selectPost(data as Post);
   }
@@ -970,6 +977,43 @@ function NewsPanel() {
     const updated = { ...selected, title: editTitle, body: editBody, post_date: editDate };
     setSelected(updated);
     setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  }
+
+  async function replaceCoverImage(blob: Blob) {
+    if (!selected) return;
+    setCoverError(null);
+    setUploadingCover(true);
+
+    const path = `posts/${Date.now()}-cover.jpg`;
+    const { error: uploadErr } = await supabase.storage
+      .from('gallery')
+      .upload(path, blob, { contentType: 'image/jpeg' });
+    if (uploadErr) {
+      setCoverError(uploadErr.message);
+      setUploadingCover(false);
+      return;
+    }
+
+    const { error: updateErr } = await supabase
+      .from('news_posts')
+      .update({ cover_image_path: path })
+      .eq('id', selected.id);
+    if (updateErr) {
+      setCoverError(updateErr.message);
+      setUploadingCover(false);
+      return;
+    }
+
+    const oldPath = selected.cover_image_path;
+    if (oldPath) {
+      await supabase.storage.from('gallery').remove([oldPath]);
+    }
+
+    const updated = { ...selected, cover_image_path: path };
+    setSelected(updated);
+    setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    setRawEditCoverFile(null);
+    setUploadingCover(false);
   }
 
   async function togglePublish() {
@@ -1067,21 +1111,50 @@ function NewsPanel() {
           </div>
           <div>
             <label className={labelClass}>Foto de capa (opcional)</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => setCoverFile(e.target.files?.[0] ?? null)}
-              className={inputClass}
-            />
+            {rawCoverFile ? (
+              <ImageCropper
+                file={rawCoverFile}
+                onCancel={() => setRawCoverFile(null)}
+                onConfirm={(blob) => {
+                  setCoverFile(new File([blob], 'cover.jpg', { type: 'image/jpeg' }));
+                  setRawCoverFile(null);
+                }}
+              />
+            ) : coverFile ? (
+              <div className="flex items-center gap-3">
+                <img
+                  src={URL.createObjectURL(coverFile)}
+                  alt="Prévia da capa"
+                  className="h-16 w-28 rounded object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => setCoverFile(null)}
+                  className={deleteButtonClass}
+                >
+                  trocar imagem
+                </button>
+              </div>
+            ) : (
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => setRawCoverFile(e.target.files?.[0] ?? null)}
+                className={inputClass}
+              />
+            )}
           </div>
           <div>
-            <label className={labelClass}>Texto</label>
+            <label className={labelClass}>
+              Texto <span className="text-white/40">(aceita Markdown)</span>
+            </label>
             <textarea
               required
               rows={5}
               value={body}
               onChange={(e) => setBody(e.target.value)}
               className={inputClass}
+              placeholder={'**negrito**, _itálico_, [Liga](https://prankstersvgc.github.io/liga/)'}
             />
           </div>
           {createError && <p className="text-sm text-red-400">{createError}</p>}
@@ -1175,7 +1248,9 @@ function NewsPanel() {
                 />
               </div>
               <div>
-                <label className={labelClass}>Texto</label>
+                <label className={labelClass}>
+                  Texto <span className="text-white/40">(aceita Markdown)</span>
+                </label>
                 <textarea
                   required
                   rows={5}
@@ -1189,6 +1264,47 @@ function NewsPanel() {
                 {savingEdit ? 'Salvando...' : 'Salvar texto'}
               </button>
             </form>
+
+            <div className="mb-6">
+              <h4 className="mb-2 text-sm font-semibold text-white/50">Capa</h4>
+              {rawEditCoverFile ? (
+                <ImageCropper
+                  file={rawEditCoverFile}
+                  onCancel={() => setRawEditCoverFile(null)}
+                  onConfirm={(blob) => replaceCoverImage(blob)}
+                />
+              ) : (
+                <div className="flex items-center gap-3">
+                  {selected.cover_image_path ? (
+                    <img
+                      src={
+                        supabase.storage.from('gallery').getPublicUrl(selected.cover_image_path)
+                          .data.publicUrl
+                      }
+                      alt="Capa atual"
+                      className="h-16 w-28 rounded object-cover"
+                    />
+                  ) : (
+                    <p className="text-sm text-white/40">Sem foto de capa.</p>
+                  )}
+                  <label className={buttonClass + ' cursor-pointer'}>
+                    {uploadingCover
+                      ? 'Enviando...'
+                      : selected.cover_image_path
+                        ? 'Trocar capa'
+                        : 'Adicionar capa'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={uploadingCover}
+                      onChange={(e) => setRawEditCoverFile(e.target.files?.[0] ?? null)}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              )}
+              {coverError && <p className="mt-2 text-sm text-red-400">{coverError}</p>}
+            </div>
 
             <h4 className="mb-2 text-sm font-semibold text-white/50">Resultados da notícia (opcional)</h4>
             <p className="mb-3 text-xs text-white/40">
@@ -1238,9 +1354,6 @@ function NewsPanel() {
                   placeholder="https://pokepast.es/..."
                 />
               </div>
-              <p className="text-xs text-white/40">
-                Pontos: <strong>{wins * 3 + 1}</strong> (3 por vitória + 1 de participação)
-              </p>
               {resultError && <p className="text-sm text-red-400">{resultError}</p>}
               <button type="submit" className={buttonClass}>
                 Adicionar jogador
@@ -1254,7 +1367,7 @@ function NewsPanel() {
                   className="flex items-center justify-between rounded bg-prank-surface-2 px-3 py-2 text-sm"
                 >
                   <span>
-                    {r.name} — {r.wins}V {r.losses}D — {r.points}pts
+                    {r.name} — {r.wins}V {r.losses}D
                     {r.paste_url && (
                       <a
                         href={r.paste_url}
