@@ -1,15 +1,11 @@
--- Schema do site do Team Pranksters
--- Rode este arquivo inteiro no SQL Editor do seu projeto Supabase (supabase.com).
--- Ele é seguro de rodar de novo (idempotente) SE VOCÊ NÃO SE IMPORTAR DE PERDER OS DADOS
--- DA LIGA: a seção de reset abaixo apaga e recria league_seasons/league_rounds/league_results
--- toda vez. Amistosos, torneios, fotos e jogadores não são apagados.
-
--- ============ RESET DA LIGA (apaga rodadas/resultados/temporadas) ============
-
-drop view if exists public.league_standings;
-drop table if exists public.league_results;
-drop table if exists public.league_rounds;
-drop table if exists public.league_seasons;
+-- Migration inicial (baseline) do site do Team Pranksters.
+-- Representa tudo que já existia no banco antes de adotarmos migrations com a CLI do
+-- Supabase — por isso é idempotente (IF NOT EXISTS / ADD COLUMN IF NOT EXISTS / DROP
+-- POLICY IF EXISTS antes de recriar): rodar em cima do banco de produção, que já tinha
+-- boa parte disso criado manualmente, não apaga nem duplica nada.
+--
+-- A partir daqui, qualquer mudança de schema vira uma migration NOVA (nunca edite esta).
+-- Veja o README na seção "Mudanças no banco (migrations)" pra saber como.
 
 -- ============ TABELAS ============
 
@@ -51,10 +47,18 @@ create table if not exists public.league_results (
   wins int not null default 0 check (wins >= 0),
   losses int not null default 0 check (losses >= 0),
   points int generated always as (wins * 3 + 1) stored,
+  paste_url text,
   created_at timestamptz not null default now(),
   unique (round_id, player_id)
 );
 
+-- paste_url foi adicionado depois — ADD COLUMN IF NOT EXISTS cobre quem já tinha a tabela
+-- criada sem essa coluna.
+alter table public.league_results add column if not exists paste_url text;
+
+-- "Amistosos" e "Fotos" (galeria avulsa) saíram do site — o conteúdo delas agora vira
+-- posts no feed de notícias. As tabelas ficam aqui sem uso, sem risco, caso precisem
+-- voltar um dia; não são mais referenciadas pelo app.
 create table if not exists public.friendlies (
   id uuid primary key default gen_random_uuid(),
   opponent_team text not null,
@@ -62,6 +66,14 @@ create table if not exists public.friendlies (
   our_score int not null default 0,
   their_score int not null default 0,
   notes text,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.gallery_photos (
+  id uuid primary key default gen_random_uuid(),
+  image_path text not null,
+  caption text,
+  event_date date,
   created_at timestamptz not null default now()
 );
 
@@ -76,12 +88,29 @@ create table if not exists public.tournaments (
   created_at timestamptz not null default now()
 );
 
-create table if not exists public.gallery_photos (
+-- Feed de notícias (a home do site). Um post pode ter texto, uma foto de capa e,
+-- opcionalmente, uma tabela de resultados avulsa (post_results) — pra eventos que não
+-- são rodada da liga, tipo um Challenge da loja.
+create table if not exists public.news_posts (
   id uuid primary key default gen_random_uuid(),
-  image_path text not null,
-  caption text,
-  event_date date,
+  title text not null,
+  body text not null,
+  cover_image_path text,
+  post_date date not null default current_date,
+  is_published boolean not null default false,
   created_at timestamptz not null default now()
+);
+
+create table if not exists public.post_results (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references public.news_posts(id) on delete cascade,
+  player_id uuid not null references public.league_players(id) on delete cascade,
+  wins int not null default 0 check (wins >= 0),
+  losses int not null default 0 check (losses >= 0),
+  points int generated always as (wins * 3 + 1) stored,
+  paste_url text,
+  created_at timestamptz not null default now(),
+  unique (post_id, player_id)
 );
 
 -- Classificação acumulada, agrupada por temporada.
@@ -116,6 +145,8 @@ grant select on
   public.friendlies,
   public.tournaments,
   public.gallery_photos,
+  public.news_posts,
+  public.post_results,
   public.league_standings
 to anon, authenticated;
 
@@ -126,12 +157,16 @@ grant insert, update, delete on
   public.league_results,
   public.friendlies,
   public.tournaments,
-  public.gallery_photos
+  public.gallery_photos,
+  public.news_posts,
+  public.post_results
 to authenticated;
 
 -- ============ ROW LEVEL SECURITY ============
 -- Leitura liberada pra qualquer visitante; escrita só pra quem estiver logado
 -- (as 4 contas do time, criadas manualmente em Authentication > Users).
+-- news_posts/post_results são a exceção: rascunho (is_published = false) só aparece
+-- pra quem está logado, até alguém publicar.
 -- Os "drop policy if exists" deixam este arquivo seguro de rodar mais de uma vez.
 
 alter table public.league_players enable row level security;
@@ -141,6 +176,8 @@ alter table public.league_results enable row level security;
 alter table public.friendlies enable row level security;
 alter table public.tournaments enable row level security;
 alter table public.gallery_photos enable row level security;
+alter table public.news_posts enable row level security;
+alter table public.post_results enable row level security;
 
 drop policy if exists "public read" on public.league_players;
 drop policy if exists "public read" on public.league_seasons;
@@ -149,6 +186,8 @@ drop policy if exists "public read" on public.league_results;
 drop policy if exists "public read" on public.friendlies;
 drop policy if exists "public read" on public.tournaments;
 drop policy if exists "public read" on public.gallery_photos;
+drop policy if exists "published or own" on public.news_posts;
+drop policy if exists "results of visible posts" on public.post_results;
 
 create policy "public read" on public.league_players for select using (true);
 create policy "public read" on public.league_seasons for select using (true);
@@ -158,6 +197,18 @@ create policy "public read" on public.friendlies for select using (true);
 create policy "public read" on public.tournaments for select using (true);
 create policy "public read" on public.gallery_photos for select using (true);
 
+create policy "published or own" on public.news_posts for select
+  using (is_published = true or auth.role() = 'authenticated');
+
+create policy "results of visible posts" on public.post_results for select
+  using (
+    exists (
+      select 1 from public.news_posts p
+      where p.id = post_results.post_id
+        and (p.is_published = true or auth.role() = 'authenticated')
+    )
+  );
+
 drop policy if exists "team write" on public.league_players;
 drop policy if exists "team write" on public.league_seasons;
 drop policy if exists "team write" on public.league_rounds;
@@ -165,6 +216,8 @@ drop policy if exists "team write" on public.league_results;
 drop policy if exists "team write" on public.friendlies;
 drop policy if exists "team write" on public.tournaments;
 drop policy if exists "team write" on public.gallery_photos;
+drop policy if exists "team write" on public.news_posts;
+drop policy if exists "team write" on public.post_results;
 
 create policy "team write" on public.league_players for all
   using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
@@ -180,8 +233,13 @@ create policy "team write" on public.tournaments for all
   using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 create policy "team write" on public.gallery_photos for all
   using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "team write" on public.news_posts for all
+  using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+create policy "team write" on public.post_results for all
+  using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
 
--- ============ STORAGE (fotos da galeria) ============
+-- ============ STORAGE (fotos) ============
+-- O mesmo bucket "gallery" é usado pra imagem de capa dos posts do feed.
 
 insert into storage.buckets (id, name, public)
 values ('gallery', 'gallery', true)

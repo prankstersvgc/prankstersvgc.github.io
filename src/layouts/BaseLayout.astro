@@ -9,7 +9,7 @@ interface Props {
 
 const {
   title,
-  description = 'Time Pranksters de Pokémon VGC — liga semanal, amistosos, torneios e resultados.',
+  description = 'Time Pranksters de Pokémon VGC — notícias, liga semanal e torneios.',
 } = Astro.props;
 
 const pageTitle = title ? `${title} · Pranksters VGC` : 'Pranksters VGC';
@@ -17,9 +17,7 @@ const pageTitle = title ? `${title} · Pranksters VGC` : 'Pranksters VGC';
 const navLinks = [
   { href: '/', label: 'Início' },
   { href: '/liga', label: 'Liga' },
-  { href: '/amistosos', label: 'Amistosos' },
   { href: '/torneios', label: 'Torneios' },
-  { href: '/galeria', label: 'Galeria' },
 ];
 
 const currentPath = Astro.url.pathname;
@@ -95,7 +93,7 @@ const currentPath = Astro.url.pathname;
       <div class="mx-auto flex max-w-5xl flex-col items-center gap-4 px-4 py-8 text-center sm:flex-row sm:justify-between sm:text-left">
         <div class="text-sm text-white/50">
           <p class="font-display text-base text-white">Team Pranksters</p>
-          <p>Pokémon VGC · Liga semanal e amistosos</p>
+          <p>Pokémon VGC · Liga semanal e torneios</p>
         </div>
         <a
           href="#"

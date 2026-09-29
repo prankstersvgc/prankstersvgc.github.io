@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { supabase, supabaseConfigured } from '../../lib/supabase';
 import { base } from '../../lib/base';
 
-type Tab = 'liga' | 'amistosos' | 'torneios' | 'fotos';
+type Tab = 'liga' | 'noticias' | 'torneios';
 
 const inputClass =
   'w-full rounded-md border border-prank-border bg-prank-bg px-3 py-2 text-white outline-none focus:border-prank-gold';
@@ -50,9 +50,8 @@ export default function AdminDashboard() {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'liga', label: 'Rodada da liga' },
-    { id: 'amistosos', label: 'Amistoso' },
+    { id: 'noticias', label: 'Notícia' },
     { id: 'torneios', label: 'Torneio' },
-    { id: 'fotos', label: 'Fotos' },
   ];
 
   return (
@@ -84,9 +83,8 @@ export default function AdminDashboard() {
       </div>
 
       {tab === 'liga' && <LeagueRoundPanel />}
-      {tab === 'amistosos' && <FriendlyPanel />}
+      {tab === 'noticias' && <NewsPanel />}
       {tab === 'torneios' && <TournamentPanel />}
-      {tab === 'fotos' && <PhotoPanel />}
     </div>
   );
 }
@@ -113,6 +111,7 @@ interface ResultRow {
   wins: number;
   losses: number;
   points: number;
+  paste_url: string | null;
   league_players: { name: string } | null;
 }
 
@@ -127,6 +126,7 @@ interface RoundEntry {
   checked: boolean;
   wins: number;
   losses: number;
+  pasteUrl: string;
   resultId: string | null;
 }
 
@@ -140,6 +140,7 @@ function buildRoundEntries(roster: RosterPlayer[], results: ResultRow[]): RoundE
         checked: Boolean(existing),
         wins: existing?.wins ?? 0,
         losses: existing?.losses ?? 0,
+        pasteUrl: existing?.paste_url ?? '',
         resultId: existing?.id ?? null,
       };
     })
@@ -163,6 +164,7 @@ function LeagueRoundPanel() {
   const [playerName, setPlayerName] = useState('');
   const [wins, setWins] = useState(0);
   const [losses, setLosses] = useState(0);
+  const [pasteUrl, setPasteUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -202,7 +204,7 @@ function LeagueRoundPanel() {
   async function loadResults(roundId: string, roster: RosterPlayer[]) {
     const { data } = await supabase
       .from('league_results')
-      .select('id, player_id, wins, losses, points, league_players(name)')
+      .select('id, player_id, wins, losses, points, paste_url, league_players(name)')
       .eq('round_id', roundId);
     const list = (data as unknown as ResultRow[]) ?? [];
     setRoundEntries(buildRoundEntries(roster, list));
@@ -315,6 +317,7 @@ function LeagueRoundPanel() {
           player_id: e.player_id,
           wins: e.wins,
           losses: e.losses,
+          paste_url: e.pasteUrl.trim() || null,
         })),
         { onConflict: 'round_id,player_id' },
       );
@@ -372,7 +375,7 @@ function LeagueRoundPanel() {
     }
 
     const { error: resultErr } = await supabase.from('league_results').upsert(
-      { round_id: selectedRound.id, player_id: playerId, wins, losses },
+      { round_id: selectedRound.id, player_id: playerId, wins, losses, paste_url: pasteUrl.trim() || null },
       { onConflict: 'round_id,player_id' },
     );
     if (resultErr) {
@@ -383,6 +386,7 @@ function LeagueRoundPanel() {
     setPlayerName('');
     setWins(0);
     setLosses(0);
+    setPasteUrl('');
     const roster = await loadSeasonRoster(activeSeason.id);
     loadResults(selectedRound.id, roster);
   }
@@ -540,7 +544,7 @@ function LeagueRoundPanel() {
                       desmarcado e não soma ponto nenhum.
                     </p>
                     <div className="mb-4 overflow-x-auto rounded-lg border border-prank-border">
-                      <table className="w-full min-w-[420px] text-left text-sm">
+                      <table className="w-full min-w-[560px] text-left text-sm">
                         <thead className="bg-prank-surface-2 text-xs uppercase tracking-wide text-white/50">
                           <tr>
                             <th className="px-3 py-2">Jogou</th>
@@ -548,6 +552,7 @@ function LeagueRoundPanel() {
                             <th className="px-3 py-2 text-center">V</th>
                             <th className="px-3 py-2 text-center">D</th>
                             <th className="px-3 py-2 text-right">Pts</th>
+                            <th className="px-3 py-2">Paste</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -596,6 +601,18 @@ function LeagueRoundPanel() {
                               </td>
                               <td className="px-3 py-2 text-right font-display font-semibold text-prank-gold">
                                 {entry.checked ? entry.wins * 3 + 1 : '—'}
+                              </td>
+                              <td className="px-3 py-2">
+                                <input
+                                  type="url"
+                                  placeholder="link do paste"
+                                  disabled={!entry.checked}
+                                  value={entry.pasteUrl}
+                                  onChange={(e) =>
+                                    updateEntry(entry.player_id, { pasteUrl: e.target.value })
+                                  }
+                                  className="w-36 rounded border border-prank-border bg-prank-bg px-2 py-1 text-xs text-white outline-none focus:border-prank-gold disabled:opacity-30"
+                                />
                               </td>
                             </tr>
                           ))}
@@ -651,6 +668,16 @@ function LeagueRoundPanel() {
                       />
                     </div>
                   </div>
+                  <div>
+                    <label className={labelClass}>Link do paste (opcional)</label>
+                    <input
+                      type="url"
+                      value={pasteUrl}
+                      onChange={(e) => setPasteUrl(e.target.value)}
+                      className={inputClass}
+                      placeholder="https://pokepast.es/..."
+                    />
+                  </div>
                   <p className="text-xs text-white/40">
                     Pontos calculados automaticamente: <strong>{wins * 3 + 1}</strong> (3 por
                     vitória + 1 de participação)
@@ -665,137 +692,6 @@ function LeagueRoundPanel() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-// ---------- Amistosos ----------
-
-interface Friendly {
-  id: string;
-  opponent_team: string;
-  played_at: string;
-  our_score: number;
-  their_score: number;
-  notes: string | null;
-}
-
-function FriendlyPanel() {
-  const [rows, setRows] = useState<Friendly[]>([]);
-  const [opponent, setOpponent] = useState('');
-  const [playedAt, setPlayedAt] = useState(today());
-  const [ourScore, setOurScore] = useState(0);
-  const [theirScore, setTheirScore] = useState(0);
-  const [notes, setNotes] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  async function load() {
-    const { data } = await supabase
-      .from('friendlies')
-      .select('*')
-      .order('played_at', { ascending: false });
-    setRows((data as Friendly[]) ?? []);
-  }
-
-  useEffect(() => {
-    load();
-  }, []);
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    const { error: err } = await supabase.from('friendlies').insert({
-      opponent_team: opponent,
-      played_at: playedAt,
-      our_score: ourScore,
-      their_score: theirScore,
-      notes: notes || null,
-    });
-    if (err) {
-      setError(err.message);
-      return;
-    }
-    setOpponent('');
-    setOurScore(0);
-    setTheirScore(0);
-    setNotes('');
-    load();
-  }
-
-  async function remove(id: string) {
-    await supabase.from('friendlies').delete().eq('id', id);
-    load();
-  }
-
-  return (
-    <div className="grid gap-6 md:grid-cols-2">
-      <div className={cardClass}>
-        <h3 className="font-display mb-3 text-lg font-semibold">Novo amistoso</h3>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <div>
-            <label className={labelClass}>Time adversário</label>
-            <input required value={opponent} onChange={(e) => setOpponent(e.target.value)} className={inputClass} />
-          </div>
-          <div>
-            <label className={labelClass}>Data</label>
-            <input
-              type="date"
-              required
-              value={playedAt}
-              onChange={(e) => setPlayedAt(e.target.value)}
-              className={inputClass}
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className={labelClass}>Nosso placar</label>
-              <input
-                type="number"
-                min={0}
-                value={ourScore}
-                onChange={(e) => setOurScore(Number(e.target.value))}
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Placar deles</label>
-              <input
-                type="number"
-                min={0}
-                value={theirScore}
-                onChange={(e) => setTheirScore(Number(e.target.value))}
-                className={inputClass}
-              />
-            </div>
-          </div>
-          <div>
-            <label className={labelClass}>Observações (opcional)</label>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} className={inputClass} rows={2} />
-          </div>
-          {error && <p className="text-sm text-red-400">{error}</p>}
-          <button type="submit" className={buttonClass}>
-            Salvar amistoso
-          </button>
-        </form>
-      </div>
-
-      <div className={cardClass}>
-        <h3 className="font-display mb-3 text-lg font-semibold">Amistosos lançados</h3>
-        <ul className="flex flex-col gap-2">
-          {rows.map((f) => (
-            <li key={f.id} className="flex items-center justify-between rounded bg-prank-surface-2 px-3 py-2 text-sm">
-              <span>
-                vs {f.opponent_team} — {f.our_score}x{f.their_score} (
-                {new Date(f.played_at + 'T00:00:00').toLocaleDateString('pt-BR')})
-              </span>
-              <button onClick={() => remove(f.id)} className={deleteButtonClass}>
-                excluir
-              </button>
-            </li>
-          ))}
-          {rows.length === 0 && <p className="text-sm text-white/40">Nenhum amistoso ainda.</p>}
-        </ul>
-      </div>
     </div>
   );
 }
@@ -926,116 +822,461 @@ function TournamentPanel() {
   );
 }
 
-// ---------- Fotos ----------
 
-interface Photo {
+// ---------- Notícias ----------
+
+interface Post {
   id: string;
-  image_path: string;
-  caption: string | null;
-  event_date: string | null;
+  title: string;
+  body: string;
+  cover_image_path: string | null;
+  post_date: string;
+  is_published: boolean;
 }
 
-function PhotoPanel() {
-  const [rows, setRows] = useState<Photo[]>([]);
-  const [file, setFile] = useState<File | null>(null);
-  const [caption, setCaption] = useState('');
-  const [eventDate, setEventDate] = useState(today());
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+interface PostResultEntry {
+  id: string;
+  player_id: string;
+  name: string;
+  wins: number;
+  losses: number;
+  points: number;
+  paste_url: string | null;
+}
 
-  async function load() {
-    const { data } = await supabase.from('gallery_photos').select('*').order('created_at', { ascending: false });
-    setRows((data as Photo[]) ?? []);
+function NewsPanel() {
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [selected, setSelected] = useState<Post | null>(null);
+  const [results, setResults] = useState<PostResultEntry[]>([]);
+
+  const [title, setTitle] = useState('');
+  const [postDate, setPostDate] = useState(today());
+  const [body, setBody] = useState('');
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const [editTitle, setEditTitle] = useState('');
+  const [editBody, setEditBody] = useState('');
+  const [editDate, setEditDate] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
+  const [playerName, setPlayerName] = useState('');
+  const [wins, setWins] = useState(0);
+  const [losses, setLosses] = useState(0);
+  const [pasteUrl, setPasteUrl] = useState('');
+  const [resultError, setResultError] = useState<string | null>(null);
+
+  async function loadPosts() {
+    const { data } = await supabase
+      .from('news_posts')
+      .select('*')
+      .order('post_date', { ascending: false })
+      .order('created_at', { ascending: false });
+    setPosts((data as Post[]) ?? []);
   }
 
   useEffect(() => {
-    load();
+    loadPosts();
   }, []);
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!file) return;
-    setError(null);
-    setUploading(true);
-
-    const path = `${Date.now()}-${file.name.replace(/\s+/g, '-')}`;
-    const { error: uploadErr } = await supabase.storage.from('gallery').upload(path, file);
-    if (uploadErr) {
-      setError(uploadErr.message);
-      setUploading(false);
-      return;
-    }
-
-    const { error: insertErr } = await supabase.from('gallery_photos').insert({
-      image_path: path,
-      caption: caption || null,
-      event_date: eventDate || null,
-    });
-    setUploading(false);
-    if (insertErr) {
-      setError(insertErr.message);
-      return;
-    }
-
-    setFile(null);
-    setCaption('');
-    load();
+  async function loadResults(postId: string) {
+    const { data } = await supabase
+      .from('post_results')
+      .select('id, player_id, wins, losses, points, paste_url, league_players(name)')
+      .eq('post_id', postId);
+    const list = (
+      (data as unknown as Array<{
+        id: string;
+        player_id: string;
+        wins: number;
+        losses: number;
+        points: number;
+        paste_url: string | null;
+        league_players: { name: string } | null;
+      }>) ?? []
+    ).map((r) => ({
+      id: r.id,
+      player_id: r.player_id,
+      name: r.league_players?.name ?? '—',
+      wins: r.wins,
+      losses: r.losses,
+      points: r.points,
+      paste_url: r.paste_url,
+    }));
+    list.sort((a, b) => b.points - a.points || a.name.localeCompare(b.name, 'pt-BR'));
+    setResults(list);
   }
 
-  async function remove(photo: Photo) {
-    await supabase.storage.from('gallery').remove([photo.image_path]);
-    await supabase.from('gallery_photos').delete().eq('id', photo.id);
-    load();
+  function selectPost(post: Post) {
+    setSelected(post);
+    setEditTitle(post.title);
+    setEditBody(post.body);
+    setEditDate(post.post_date);
+    loadResults(post.id);
+  }
+
+  async function createPost(e: FormEvent) {
+    e.preventDefault();
+    setCreateError(null);
+    setCreating(true);
+
+    let coverPath: string | null = null;
+    if (coverFile) {
+      const path = `posts/${Date.now()}-${coverFile.name.replace(/\s+/g, '-')}`;
+      const { error: uploadErr } = await supabase.storage.from('gallery').upload(path, coverFile);
+      if (uploadErr) {
+        setCreateError(uploadErr.message);
+        setCreating(false);
+        return;
+      }
+      coverPath = path;
+    }
+
+    const { data, error: err } = await supabase
+      .from('news_posts')
+      .insert({ title, body, post_date: postDate, cover_image_path: coverPath, is_published: false })
+      .select()
+      .single();
+
+    setCreating(false);
+    if (err) {
+      setCreateError(err.message);
+      return;
+    }
+
+    setTitle('');
+    setBody('');
+    setPostDate(today());
+    setCoverFile(null);
+    await loadPosts();
+    selectPost(data as Post);
+  }
+
+  async function saveEdit() {
+    if (!selected) return;
+    setEditError(null);
+    setSavingEdit(true);
+    const { error: err } = await supabase
+      .from('news_posts')
+      .update({ title: editTitle, body: editBody, post_date: editDate })
+      .eq('id', selected.id);
+    setSavingEdit(false);
+    if (err) {
+      setEditError(err.message);
+      return;
+    }
+    const updated = { ...selected, title: editTitle, body: editBody, post_date: editDate };
+    setSelected(updated);
+    setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  }
+
+  async function togglePublish() {
+    if (!selected) return;
+    const next = !selected.is_published;
+    await supabase.from('news_posts').update({ is_published: next }).eq('id', selected.id);
+    const updated = { ...selected, is_published: next };
+    setSelected(updated);
+    setPosts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  }
+
+  async function deletePost(post: Post) {
+    if (
+      !confirm(`Apagar a notícia "${post.title}"? Isso remove o texto, a foto e a tabela de resultados dela.`)
+    )
+      return;
+    if (post.cover_image_path) {
+      await supabase.storage.from('gallery').remove([post.cover_image_path]);
+    }
+    await supabase.from('news_posts').delete().eq('id', post.id);
+    if (selected?.id === post.id) {
+      setSelected(null);
+      setResults([]);
+    }
+    loadPosts();
+  }
+
+  async function addResult(e: FormEvent) {
+    e.preventDefault();
+    if (!selected) return;
+    setResultError(null);
+
+    let playerId: string;
+    const { data: existing } = await supabase
+      .from('league_players')
+      .select('id')
+      .ilike('name', playerName.trim())
+      .maybeSingle();
+
+    if (existing) {
+      playerId = existing.id;
+    } else {
+      const { data: created, error: createErr } = await supabase
+        .from('league_players')
+        .insert({ name: playerName.trim() })
+        .select()
+        .single();
+      if (createErr) {
+        setResultError(createErr.message);
+        return;
+      }
+      playerId = created.id;
+    }
+
+    const { error: resultErr } = await supabase.from('post_results').upsert(
+      { post_id: selected.id, player_id: playerId, wins, losses, paste_url: pasteUrl.trim() || null },
+      { onConflict: 'post_id,player_id' },
+    );
+    if (resultErr) {
+      setResultError(resultErr.message);
+      return;
+    }
+
+    setPlayerName('');
+    setWins(0);
+    setLosses(0);
+    setPasteUrl('');
+    loadResults(selected.id);
+  }
+
+  async function removeResult(id: string) {
+    if (!selected) return;
+    await supabase.from('post_results').delete().eq('id', id);
+    loadResults(selected.id);
   }
 
   return (
-    <div className="grid gap-6 md:grid-cols-2">
-      <div className={cardClass}>
-        <h3 className="font-display mb-3 text-lg font-semibold">Nova foto</h3>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+    <div className="flex flex-col gap-6 md:flex-row">
+      <div className={cardClass + ' md:w-80 md:flex-none'}>
+        <h3 className="font-display mb-3 text-lg font-semibold">Nova notícia</h3>
+        <form onSubmit={createPost} className="flex flex-col gap-3">
           <div>
-            <label className={labelClass}>Arquivo</label>
+            <label className={labelClass}>Título</label>
+            <input required value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} />
+          </div>
+          <div>
+            <label className={labelClass}>Data</label>
+            <input
+              type="date"
+              required
+              value={postDate}
+              onChange={(e) => setPostDate(e.target.value)}
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className={labelClass}>Foto de capa (opcional)</label>
             <input
               type="file"
               accept="image/*"
+              onChange={(e) => setCoverFile(e.target.files?.[0] ?? null)}
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className={labelClass}>Texto</label>
+            <textarea
               required
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              rows={5}
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
               className={inputClass}
             />
           </div>
-          <div>
-            <label className={labelClass}>Legenda (opcional)</label>
-            <input value={caption} onChange={(e) => setCaption(e.target.value)} className={inputClass} />
-          </div>
-          <div>
-            <label className={labelClass}>Data do evento (opcional)</label>
-            <input
-              type="date"
-              value={eventDate}
-              onChange={(e) => setEventDate(e.target.value)}
-              className={inputClass}
-            />
-          </div>
-          {error && <p className="text-sm text-red-400">{error}</p>}
-          <button type="submit" disabled={uploading} className={buttonClass}>
-            {uploading ? 'Enviando...' : 'Publicar foto'}
+          {createError && <p className="text-sm text-red-400">{createError}</p>}
+          <button type="submit" disabled={creating} className={buttonClass}>
+            {creating ? 'Criando...' : 'Criar rascunho'}
           </button>
+          <p className="text-xs text-white/40">
+            Cria como rascunho — ninguém vê até você clicar em "Publicar".
+          </p>
         </form>
-      </div>
 
-      <div className={cardClass}>
-        <h3 className="font-display mb-3 text-lg font-semibold">Fotos publicadas</h3>
-        <ul className="flex flex-col gap-2">
-          {rows.map((p) => (
-            <li key={p.id} className="flex items-center justify-between rounded bg-prank-surface-2 px-3 py-2 text-sm">
-              <span className="truncate">{p.caption || p.image_path}</span>
-              <button onClick={() => remove(p)} className={deleteButtonClass}>
-                excluir
+        <h4 className="mt-6 mb-2 text-sm font-semibold text-white/50">Notícias</h4>
+        <ul className="flex flex-col gap-1">
+          {posts.map((p) => (
+            <li key={p.id}>
+              <button
+                onClick={() => selectPost(p)}
+                className={
+                  'flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-sm hover:bg-prank-surface-2 ' +
+                  (selected?.id === p.id ? 'bg-prank-surface-2 text-prank-gold' : '')
+                }
+              >
+                <span className="truncate">{p.title}</span>
+                <span
+                  className={
+                    'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ' +
+                    (p.is_published
+                      ? 'bg-emerald-500/20 text-emerald-400'
+                      : 'bg-amber-500/20 text-amber-400')
+                  }
+                >
+                  {p.is_published ? 'Publicada' : 'Rascunho'}
+                </span>
               </button>
             </li>
           ))}
-          {rows.length === 0 && <p className="text-sm text-white/40">Nenhuma foto ainda.</p>}
+          {posts.length === 0 && <p className="text-sm text-white/40">Nenhuma notícia ainda.</p>}
         </ul>
+      </div>
+
+      <div className={cardClass + ' flex-1'}>
+        {!selected ? (
+          <p className="text-white/50">Crie ou selecione uma notícia à esquerda.</p>
+        ) : (
+          <>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <span
+                className={
+                  'rounded px-2 py-1 text-xs font-bold uppercase ' +
+                  (selected.is_published
+                    ? 'bg-emerald-500/20 text-emerald-400'
+                    : 'bg-amber-500/20 text-amber-400')
+                }
+              >
+                {selected.is_published ? 'Publicada' : 'Rascunho'}
+              </span>
+              <div className="flex gap-2">
+                <button onClick={togglePublish} className={buttonClass}>
+                  {selected.is_published ? 'Despublicar' : 'Publicar'}
+                </button>
+                <button onClick={() => deletePost(selected)} className={deleteButtonClass}>
+                  Excluir notícia
+                </button>
+              </div>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                saveEdit();
+              }}
+              className="mb-6 flex flex-col gap-3"
+            >
+              <div>
+                <label className={labelClass}>Título</label>
+                <input
+                  required
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Data</label>
+                <input
+                  type="date"
+                  required
+                  value={editDate}
+                  onChange={(e) => setEditDate(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Texto</label>
+                <textarea
+                  required
+                  rows={5}
+                  value={editBody}
+                  onChange={(e) => setEditBody(e.target.value)}
+                  className={inputClass}
+                />
+              </div>
+              {editError && <p className="text-sm text-red-400">{editError}</p>}
+              <button type="submit" disabled={savingEdit} className={buttonClass}>
+                {savingEdit ? 'Salvando...' : 'Salvar texto'}
+              </button>
+            </form>
+
+            <h4 className="mb-2 text-sm font-semibold text-white/50">Resultados da notícia (opcional)</h4>
+            <p className="mb-3 text-xs text-white/40">
+              Pra eventos que não são rodada da liga (ex: um Challenge). Adiciona um jogador de cada vez.
+            </p>
+
+            <form onSubmit={addResult} className="mb-4 flex flex-col gap-3">
+              <div>
+                <label className={labelClass}>Nome do jogador</label>
+                <input
+                  required
+                  value={playerName}
+                  onChange={(e) => setPlayerName(e.target.value)}
+                  className={inputClass}
+                  placeholder="Ex: Bruno"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className={labelClass}>Vitórias</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={wins}
+                    onChange={(e) => setWins(Number(e.target.value))}
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Derrotas</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={losses}
+                    onChange={(e) => setLosses(Number(e.target.value))}
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className={labelClass}>Link do paste (opcional)</label>
+                <input
+                  type="url"
+                  value={pasteUrl}
+                  onChange={(e) => setPasteUrl(e.target.value)}
+                  className={inputClass}
+                  placeholder="https://pokepast.es/..."
+                />
+              </div>
+              <p className="text-xs text-white/40">
+                Pontos: <strong>{wins * 3 + 1}</strong> (3 por vitória + 1 de participação)
+              </p>
+              {resultError && <p className="text-sm text-red-400">{resultError}</p>}
+              <button type="submit" className={buttonClass}>
+                Adicionar jogador
+              </button>
+            </form>
+
+            <ul className="flex flex-col gap-1">
+              {results.map((r) => (
+                <li
+                  key={r.id}
+                  className="flex items-center justify-between rounded bg-prank-surface-2 px-3 py-2 text-sm"
+                >
+                  <span>
+                    {r.name} — {r.wins}V {r.losses}D — {r.points}pts
+                    {r.paste_url && (
+                      <a
+                        href={r.paste_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="ml-2 text-prank-purple-light hover:text-prank-gold"
+                      >
+                        🔗
+                      </a>
+                    )}
+                  </span>
+                  <button onClick={() => removeResult(r.id)} className={deleteButtonClass}>
+                    remover
+                  </button>
+                </li>
+              ))}
+              {results.length === 0 && (
+                <p className="text-sm text-white/40">Nenhum resultado adicionado ainda.</p>
+              )}
+            </ul>
+          </>
+        )}
       </div>
     </div>
   );

@@ -28,6 +28,7 @@ interface RoundResultRow {
   wins: number;
   losses: number;
   points: number;
+  paste_url: string | null;
 }
 
 type Tab = 'standings' | number;
@@ -233,7 +234,9 @@ export default function LeagueTable() {
         supabase.from('league_standings').select('*').eq('season_id', selectedSeasonId),
         supabase
           .from('league_results')
-          .select('wins, losses, points, league_players(name), league_rounds!inner(round_number, season_id)')
+          .select(
+            'wins, losses, points, paste_url, league_players(name), league_rounds!inner(round_number, season_id)',
+          )
           .eq('league_rounds.season_id', selectedSeasonId),
       ]);
 
@@ -245,6 +248,7 @@ export default function LeagueTable() {
         wins: number;
         losses: number;
         points: number;
+        paste_url: string | null;
         league_players: { name: string } | null;
         league_rounds: { round_number: number } | null;
       }>) ?? []) {
@@ -256,6 +260,7 @@ export default function LeagueTable() {
           wins: row.wins,
           losses: row.losses,
           points: row.points,
+          paste_url: row.paste_url,
         });
       }
       for (const key of Object.keys(grouped)) {
@@ -416,6 +421,7 @@ function RoundTable({ rows }: { rows: RoundResultRow[] }) {
             <th className="px-4 py-3">Jogador</th>
             <th className="px-4 py-3 text-center">W-L</th>
             <th className="px-4 py-3 text-right">Pontos</th>
+            <th className="px-4 py-3" />
           </tr>
         </thead>
         <tbody>
@@ -427,6 +433,19 @@ function RoundTable({ rows }: { rows: RoundResultRow[] }) {
                 {r.wins}-{r.losses}
               </td>
               <td className="px-4 py-3 text-right font-display text-lg font-bold">{r.points}</td>
+              <td className="px-4 py-3 text-right">
+                {r.paste_url && (
+                  <a
+                    href={r.paste_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Ver paste do time"
+                    className="text-prank-purple-light hover:text-prank-gold"
+                  >
+                    🔗
+                  </a>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

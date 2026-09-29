@@ -1,7 +1,7 @@
 # Site do Team Pranksters
 
-Site do time de Pokémon VGC Pranksters: liga semanal (rodando na loja **Muito!**), amistosos,
-torneios da região e galeria de fotos. Feito pra substituir a planilha.
+Site do time de Pokémon VGC Pranksters: feed de notícias, liga semanal (rodando na loja
+**Muito!**) e torneios da região. Feito pra substituir a planilha.
 
 **Stack**: [Astro](https://astro.build) + React (ilhas) + Tailwind CSS, hospedado de graça no
 GitHub Pages, com [Supabase](https://supabase.com) (Postgres + Auth + Storage, plano free) como
@@ -9,21 +9,63 @@ banco de dados.
 
 ## Como funciona
 
-- As páginas públicas (`/`, `/liga`, `/amistosos`, `/torneios`, `/galeria`) são estáticas e
-  buscam os dados direto do Supabase quando alguém abre a página — não precisa de rebuild do site
-  toda vez que alguém lança um resultado.
+- As páginas públicas (`/`, `/liga`, `/torneios`) são estáticas e buscam os dados direto do
+  Supabase quando alguém abre a página — não precisa de rebuild do site toda vez que alguém
+  lança um resultado ou publica uma notícia.
+- A home (`/`) é o feed de notícias — mostra as 5 mais recentes, com botão "carregar mais" pras
+  antigas. Uma notícia pode ter foto de capa e uma tabela de resultados avulsa (pra eventos que
+  não são rodada da liga, tipo um Challenge).
 - `/admin` é a área de login. Só funciona para contas criadas manualmente no Supabase (vocês 4).
-- `/admin/dashboard` tem os formulários pra lançar rodada da liga, amistoso, torneio e fotos.
+- `/admin/dashboard` tem os formulários pra lançar rodada da liga, notícia e torneio.
+
+> **Já tinha o site rodando e só quer pegar as novidades (notícias + link de paste)?** Pula pra
+> [Mudanças no banco (migrations)](#mudanças-no-banco-migrations) — é só `make db-push`.
+
+## Mudanças no banco (migrations)
+
+O schema do banco vive em `supabase/migrations/` (um arquivo `.sql` por mudança, nessa ordem,
+nunca edita um antigo) e é aplicado com a [CLI do Supabase](https://supabase.com/docs/guides/local-development/cli/getting-started)
+(já vem instalada como dependência do projeto — não precisa instalar nada globalmente).
+
+**Configuração única** (uma vez por pessoa/máquina):
+
+Precisa de um `.env` com pelo menos a `PUBLIC_SUPABASE_URL` preenchida (`cp .env.example .env`,
+a URL fica em **Project Settings > API** do seu projeto Supabase) — é dali que o `make db-link`
+descobre qual projeto ligar, sem precisar digitar nada.
+
+```sh
+npx supabase login          # abre o navegador pra autenticar
+make db-link                 # liga essa pasta ao projeto Supabase de vocês
+```
+
+**Aplicar as migrations** (sempre que `supabase/migrations/` tiver arquivo novo — inclusive
+agora, na primeira vez):
+
+```sh
+make db-push
+```
+
+Vai pedir a senha do banco (a que você gerou lá na criação do projeto Supabase). Ele só roda o
+que ainda não rodou — seguro de repetir sempre que quiser.
+
+**Criar uma mudança nova** (quando o site precisar de uma tabela/coluna nova):
+
+```sh
+make migration name=nome-curto-da-mudanca
+```
+
+Isso cria um arquivo vazio em `supabase/migrations/` com timestamp — escreve o SQL nele, dá
+`make db-push` de novo, e commita o arquivo no git junto com o resto do site.
 
 ## Passo a passo pra colocar no ar
-
 
 ### 1. Criar o projeto no Supabase (grátis)
 
 1. Crie uma conta em [supabase.com](https://supabase.com) e um novo projeto (escolha uma região
-   perto do Brasil, ex: São Paulo).
-2. Vá em **SQL Editor**, cole o conteúdo de [`supabase/schema.sql`](./supabase/schema.sql) e
-   rode. Isso cria as tabelas, a view de classificação, as permissões e o bucket de fotos.
+   perto do Brasil, ex: São Paulo). Guarde a senha do banco que você definir aqui — vai precisar
+   dela no passo de migrations.
+2. Siga [Mudanças no banco (migrations)](#mudanças-no-banco-migrations) pra aplicar o schema
+   (tabelas, view de classificação, permissões, bucket de fotos).
 3. Vá em **Project Settings > API** e copie a **Project URL** e a **anon public key**.
 4. Vá em **Authentication > Users** e crie manualmente uma conta (e-mail + senha) pra cada um dos
    4 membros do time que vai atualizar o site. Não existe cadastro público no site — só vocês
@@ -99,18 +141,21 @@ Sem isso o site builda, mas as páginas mostram "sem conexão com o banco".
 ### 7. Pronto
 
 Todo push na branch `main` builda e publica automaticamente. As atualizações de dados (resultado
-da rodada, amistoso, foto) não precisam de novo deploy — aparecem na hora, direto do Supabase.
+da rodada, notícia, torneio) não precisam de novo deploy — aparecem na hora, direto do Supabase.
 
 ## Comandos
 
-| Comando         | Ação                                                     |
-| --------------- | --------------------------------------------------------- |
-| `make up`       | Instala dependências (se preciso) e sobe o site em background |
-| `make down`     | Derruba o servidor local                                  |
-| `make status`   | Mostra se o servidor tá rodando                            |
-| `make logs`     | Acompanha os logs ao vivo                                  |
-| `make build`    | Builda o site estático em `./dist/`                        |
-| `make preview`  | Builda e serve a versão de produção localmente             |
+| Comando                    | Ação                                                           |
+| -------------------------- | --------------------------------------------------------------- |
+| `make up`                  | Instala dependências (se preciso) e sobe o site em background   |
+| `make down`                | Derruba o servidor local                                        |
+| `make status`              | Mostra se o servidor tá rodando                                 |
+| `make logs`                | Acompanha os logs ao vivo                                       |
+| `make build`                | Builda o site estático em `./dist/`                             |
+| `make preview`              | Builda e serve a versão de produção localmente                  |
+| `make db-link`              | Liga a pasta ao projeto Supabase (uma vez por máquina)           |
+| `make db-push`              | Aplica as migrations pendentes no banco                          |
+| `make migration name=algo`  | Cria um arquivo novo de migration                                |
 
 (equivalentes em `npm`: `npm install`, `npm run dev`, `npm run build`, `npm run preview`)
 
