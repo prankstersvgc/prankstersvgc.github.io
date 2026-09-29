@@ -421,7 +421,9 @@ function RoundTable({ rows }: { rows: RoundResultRow[] }) {
             <th className="px-4 py-3">Jogador</th>
             <th className="px-4 py-3 text-center">W-L</th>
             <th className="px-4 py-3 text-right">Pontos</th>
-            <th className="px-4 py-3" />
+            <th className="px-4 py-3 text-center" title="Open Team Sheet">
+              OTS
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -433,7 +435,7 @@ function RoundTable({ rows }: { rows: RoundResultRow[] }) {
                 {r.wins}-{r.losses}
               </td>
               <td className="px-4 py-3 text-right font-display text-lg font-bold">{r.points}</td>
-              <td className="px-4 py-3 text-right">
+              <td className="px-4 py-3 text-center">
                 {r.paste_url && (
                   <a
                     href={r.paste_url}

@@ -553,7 +553,7 @@ function LeagueRoundPanel() {
                             <th className="px-3 py-2 text-center">V</th>
                             <th className="px-3 py-2 text-center">D</th>
                             <th className="px-3 py-2 text-right">Pts</th>
-                            <th className="px-3 py-2">Paste</th>
+                            <th className="px-3 py-2">OTS</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -606,7 +606,7 @@ function LeagueRoundPanel() {
                               <td className="px-3 py-2">
                                 <input
                                   type="url"
-                                  placeholder="link do paste"
+                                  placeholder="link do OTS"
                                   disabled={!entry.checked}
                                   value={entry.pasteUrl}
                                   onChange={(e) =>
@@ -670,7 +670,7 @@ function LeagueRoundPanel() {
                     </div>
                   </div>
                   <div>
-                    <label className={labelClass}>Link do paste (opcional)</label>
+                    <label className={labelClass}>Link do OTS (opcional)</label>
                     <input
                       type="url"
                       value={pasteUrl}
@@ -841,7 +841,7 @@ interface PostResultEntry {
   name: string;
   wins: number;
   losses: number;
-  paste_url: string | null;
+  paste_url: string;
 }
 
 function NewsPanel() {
@@ -871,6 +871,8 @@ function NewsPanel() {
   const [losses, setLosses] = useState(0);
   const [pasteUrl, setPasteUrl] = useState('');
   const [resultError, setResultError] = useState<string | null>(null);
+  const [savingResults, setSavingResults] = useState(false);
+  const [saveResultsError, setSaveResultsError] = useState<string | null>(null);
 
   async function loadPosts() {
     const { data } = await supabase
@@ -905,10 +907,36 @@ function NewsPanel() {
       name: r.league_players?.name ?? '—',
       wins: r.wins,
       losses: r.losses,
-      paste_url: r.paste_url,
+      paste_url: r.paste_url ?? '',
     }));
     list.sort((a, b) => b.wins - a.wins || a.name.localeCompare(b.name, 'pt-BR'));
     setResults(list);
+  }
+
+  function updateResultEntry(id: string, patch: Partial<PostResultEntry>) {
+    setResults((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  }
+
+  async function saveResults() {
+    if (!selected || results.length === 0) return;
+    setSaveResultsError(null);
+    setSavingResults(true);
+    const { error: err } = await supabase.from('post_results').upsert(
+      results.map((r) => ({
+        post_id: selected.id,
+        player_id: r.player_id,
+        wins: r.wins,
+        losses: r.losses,
+        paste_url: r.paste_url.trim() || null,
+      })),
+      { onConflict: 'post_id,player_id' },
+    );
+    setSavingResults(false);
+    if (err) {
+      setSaveResultsError(err.message);
+      return;
+    }
+    loadResults(selected.id);
   }
 
   function selectPost(post: Post) {
@@ -1308,10 +1336,81 @@ function NewsPanel() {
 
             <h4 className="mb-2 text-sm font-semibold text-white/50">Resultados da notícia (opcional)</h4>
             <p className="mb-3 text-xs text-white/40">
-              Pra eventos que não são rodada da liga (ex: um Challenge). Adiciona um jogador de cada vez.
+              Pra eventos que não são rodada da liga (ex: um Challenge).
             </p>
 
-            <form onSubmit={addResult} className="mb-4 flex flex-col gap-3">
+            {results.length === 0 ? (
+              <p className="mb-4 text-sm text-white/40">Nenhum resultado adicionado ainda.</p>
+            ) : (
+              <>
+                <div className="mb-3 overflow-x-auto rounded-lg border border-prank-border">
+                  <table className="w-full min-w-[480px] text-left text-sm">
+                    <thead className="bg-prank-surface-2 text-xs uppercase tracking-wide text-white/50">
+                      <tr>
+                        <th className="px-3 py-2">Jogador</th>
+                        <th className="px-3 py-2 text-center">V</th>
+                        <th className="px-3 py-2 text-center">D</th>
+                        <th className="px-3 py-2">OTS</th>
+                        <th className="px-3 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {results.map((r) => (
+                        <tr key={r.id} className="border-t border-prank-border/60">
+                          <td className="px-3 py-2 font-medium">{r.name}</td>
+                          <td className="px-3 py-2 text-center">
+                            <input
+                              type="number"
+                              min={0}
+                              value={r.wins}
+                              onChange={(e) => updateResultEntry(r.id, { wins: Number(e.target.value) })}
+                              className="w-14 rounded border border-prank-border bg-prank-bg px-2 py-1 text-center text-white outline-none focus:border-prank-gold"
+                            />
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <input
+                              type="number"
+                              min={0}
+                              value={r.losses}
+                              onChange={(e) =>
+                                updateResultEntry(r.id, { losses: Number(e.target.value) })
+                              }
+                              className="w-14 rounded border border-prank-border bg-prank-bg px-2 py-1 text-center text-white outline-none focus:border-prank-gold"
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              type="url"
+                              placeholder="link do OTS"
+                              value={r.paste_url}
+                              onChange={(e) => updateResultEntry(r.id, { paste_url: e.target.value })}
+                              className="w-40 rounded border border-prank-border bg-prank-bg px-2 py-1 text-xs text-white outline-none focus:border-prank-gold"
+                            />
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <button onClick={() => removeResult(r.id)} className={deleteButtonClass}>
+                              remover
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {saveResultsError && <p className="mb-2 text-sm text-red-400">{saveResultsError}</p>}
+                <button
+                  type="button"
+                  onClick={saveResults}
+                  disabled={savingResults}
+                  className={buttonClass + ' mb-6'}
+                >
+                  {savingResults ? 'Salvando...' : 'Salvar resultados'}
+                </button>
+              </>
+            )}
+
+            <h4 className="mt-2 mb-2 text-sm font-semibold text-white/50">Jogador novo nesta notícia</h4>
+            <form onSubmit={addResult} className="flex flex-col gap-3">
               <div>
                 <label className={labelClass}>Nome do jogador</label>
                 <input
@@ -1345,7 +1444,7 @@ function NewsPanel() {
                 </div>
               </div>
               <div>
-                <label className={labelClass}>Link do paste (opcional)</label>
+                <label className={labelClass}>Link do OTS (opcional)</label>
                 <input
                   type="url"
                   value={pasteUrl}
@@ -1359,35 +1458,6 @@ function NewsPanel() {
                 Adicionar jogador
               </button>
             </form>
-
-            <ul className="flex flex-col gap-1">
-              {results.map((r) => (
-                <li
-                  key={r.id}
-                  className="flex items-center justify-between rounded bg-prank-surface-2 px-3 py-2 text-sm"
-                >
-                  <span>
-                    {r.name} — {r.wins}V {r.losses}D
-                    {r.paste_url && (
-                      <a
-                        href={r.paste_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="ml-2 text-prank-purple-light hover:text-prank-gold"
-                      >
-                        🔗
-                      </a>
-                    )}
-                  </span>
-                  <button onClick={() => removeResult(r.id)} className={deleteButtonClass}>
-                    remover
-                  </button>
-                </li>
-              ))}
-              {results.length === 0 && (
-                <p className="text-sm text-white/40">Nenhum resultado adicionado ainda.</p>
-              )}
-            </ul>
           </>
         )}
       </div>

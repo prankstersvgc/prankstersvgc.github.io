@@ -181,7 +181,9 @@ function PostCard({ post, results }: { post: Post; results: PostResult[] }) {
                   <th className="px-4 py-3">#</th>
                   <th className="px-4 py-3">Jogador</th>
                   <th className="px-4 py-3 text-center">W-L</th>
-                  <th className="px-4 py-3" />
+                  <th className="px-4 py-3 text-center" title="Open Team Sheet">
+                    OTS
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -194,7 +196,7 @@ function PostCard({ post, results }: { post: Post; results: PostResult[] }) {
                     <td className="px-4 py-3 text-center text-white/70">
                       {r.wins}-{r.losses}
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-center">
                       {r.paste_url && (
                         <a
                           href={r.paste_url}
